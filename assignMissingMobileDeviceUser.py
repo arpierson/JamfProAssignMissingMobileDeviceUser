@@ -5,12 +5,9 @@ Created on May 11, 2021
 '''
 
 import requests
-
-from os.path import expanduser
 import xml.etree.ElementTree as ET
 import re
 import ldap
-from xml.dom import minidom
 from getpass import getpass
 
 
@@ -34,7 +31,7 @@ def run():
     
     setApiCredentials()
     devicesWithoutUsers = getMobileDevicesMissingAssignedUsers()
-    addUserToDevice(11191) #using hard coded test value for now
+    assignUsersToDevices(devicesWithoutUsers)
     
 
 def setApiCredentials():
@@ -61,8 +58,7 @@ def setApiCredentials():
     _readAdvancedSearchCredentials = getpass("Please enter the Base64 Jamf Pro credential for Mobile Device Advanced Search read access: ")
     _readWriteMobileDeviceCredentials = getpass("Please enter the Base64 Jamf Pro credential for Mobile Device read/write access: ")
     
-    
-    
+  
 def getMobileDevicesMissingAssignedUsers():
     '''Uses Jamf Pro API call to get results of Jamf Pro Advanced Computer Search titled 'Management - District - Computers with blank username' and returns the search result.
     
@@ -77,34 +73,85 @@ def getMobileDevicesMissingAssignedUsers():
     
     global _readAdvancedSearchCredentials
     url = "https://jamf.hcschools.net:8443/JSSResource/advancedmobiledevicesearches/id/151"
-    headers = {'accept': 'application/json', 'authorization': "Basic " + _readAdvancedSearchCredentials}
+    headers = {'accept': 'application/xml', 'authorization': "Basic " + _readAdvancedSearchCredentials}
     searchResult = requests.get(url, headers=headers)
     return searchResult
 
 
-def addUserToDevice(deviceId):
+def getAdUserInfo(deviceId, adDistinguishedName):
+    '''Looks up a user in Active Directory and returns their AD displayName and mail attributes and the XML data for the iPad to be assigned to the user.
+    
+    Parameters
+    ----------
+    deviceId : int
+        The Jamf Pro device ID for the device whose XML needs to be retrieved.
+    adDistinguishedName : str
+        The Distinguished Name attribute of an Active Directory user.
+        
+    Reeturns
+    --------
+    adUsername : str
+        The Active Directory username of the user.
+    adDisplayName : str
+        The value of the Active Directory distinguishedName attribute of the user.
+    adEmailAddress : str
+        The value of the Active Directory email attribute of the user.
+    result : requests module result
+        Contains the XML data returned from the Jamf Pro API call for a specific mobile device.
+    '''
+    
     url = "https://jamf.hcschools.net:8443/JSSResource/mobiledevices/id/" + str(deviceId)
     headers = {'accept': 'application/xml', 'authorization': "Basic " + _readWriteMobileDeviceCredentials}
-    results = requests.get(url, headers=headers).content
-    root = ET.fromstring(results)
-    
-    extensionAttributes = root.find('extension_attributes')
+    result = requests.get(url, headers=headers).content
     userNameRegEx = re.compile("N=(.+?),")
-    adDistinguishedName = ""
-    for attribute in extensionAttributes.findall('extension_attribute'):
-        if attribute.find('name').text == "AD Distinguished Name":
-            adDistinguishedName = attribute.find('value').text
-    
     userFullName = re.search(userNameRegEx, adDistinguishedName).group(1)
-    
     adUserAccount = getAdAccountInfo(userFullName)
-    adUsername = userFullName.replace(" ", ".")
-    adDisplayName = str(adUserAccount[0][1]['displayName'][0].decode('utf-8'))
-    adEmailAddress = str(adUserAccount[0][1]['mail'][0].decode('utf-8'))
     
-    addUserInfoToXml(results, adUsername, adDisplayName, adEmailAddress)
+    if adUserAccount != None:
+        adUsername = userFullName.replace(" ", ".")
+        adDisplayName = str(adUserAccount[0][1]['displayName'][0].decode('utf-8'))
+        adEmailAddress = str(adUserAccount[0][1]['mail'][0].decode('utf-8'))
+    else:
+        print("No AD user found for " + userFullName)
+        exit()
+
+    return adUsername, adDisplayName, adEmailAddress, result
+
+
+def assignUsersToDevices(jamfProAdvancedSearchXml):
+    '''Loops through a list of mobile devices, gathers the user Active Directory information and adds it to the XML for a device.
     
+    Parameters
+    ----------
+    jamfProAdvancedSearchXml : requests module result
+        Contains the XML returned for the Jamf Pro Advanced Search results.
     
+    Returns
+    -------
+    None
+    '''
+    
+    root = ET.fromstring(jamfProAdvancedSearchXml.content)
+    mobileDevicesSubset = root.find('mobile_devices')
+    
+    for mobileDevice in mobileDevicesSubset.findall('mobile_device'):
+        deviceId = mobileDevice.find('id').text
+        userAndDeviceInfo = getAdUserInfo(deviceId, mobileDevice.find('AD_Distinguished_Name').text)
+        adUsername = userAndDeviceInfo[0]
+        adDisplayName = userAndDeviceInfo[1]
+        adEmailAddress = userAndDeviceInfo[2]
+        deviceXml = userAndDeviceInfo[3]
+        
+        correctedXml = addUserInfoToXml(deviceXml, adUsername, adDisplayName, adEmailAddress)
+         
+        result = updateDeviceXml(deviceId, correctedXml.encode('utf-8'))
+        
+        if result.status_code != 201:
+            print("Device ID " + str(deviceId) + " HTTP PUT failed with status code of " + str(result.status_code))
+        else:
+            print (adUsername + " was succesfully added to device " + str(deviceId) +".")
+          
+          
 def getAdAccountInfo(adUsername):
     '''Looks up an Active Directory account and returns the result.
     
@@ -157,6 +204,24 @@ def getAdAccountInfo(adUsername):
     
 
 def addUserInfoToXml(xmlToBeEdited, adUsername, adDisplayName, adEmailAddress):
+    '''Takes an XML string, adds the values of parameters 2, 3, and 4 to the appropriate places in the XML, and returns the newly edited XML.
+    
+    Parameters
+    ----------
+    xmlToBeEdited : str
+        The XML of a mobile device that needs the user information added.
+    adUsername : str
+        The Active Directory username for the user to be added to the device.
+    adDisplayName : str
+        The Active Directory displayName for the user to be added to the device.
+    adEmailAddress : str
+        The Active Directory email address for the user to be added to the device.
+        
+    Returns
+    -------
+    ElementTree object, encoded as Unicode, formatted as XML.
+    '''
+    
     root = ET.fromstring(xmlToBeEdited)
     
     for item in root.iter('location'):
@@ -165,14 +230,26 @@ def addUserInfoToXml(xmlToBeEdited, adUsername, adDisplayName, adEmailAddress):
         item.find('real_name').text = adDisplayName
         item.find('email_address').text = adEmailAddress
     
-    print(printList(xmlToBeEdited))
-    #return xmlToBeEdited
+    return ET.tostring(root, encoding='unicode', method='xml')
 
 
-def printList(xmlString):
-    root = ET.fromstring(xmlString)
-    roughString = ET.tostring(root, 'utf-8')
-    reparsed = minidom.parseString(roughString)
-    prettyXml = reparsed.toprettyxml(indent="\t")
-    print(prettyXml)
+def updateDeviceXml(deviceId, xmlToPut):
+    '''Takes a Jamf Pro mobile device ID and an XML string and HTTP PUTs the XML string for the device ID.
+    
+    Parameters
+    ----------
+    deviceId : int
+        The Jamf Pro device ID for the device to be edited.
+    xmlToPut : str
+        The XML string to be sent to the Jamf Pro API to edit the mobile device.
+    
+    Returns
+    -------
+    requests module response object
+    '''
+    
+    global _readWriteMobileDeviceCredentials
+    url = "https://jamf.hcschools.net:8443/JSSResource/mobiledevices/id/" + str(deviceId)
+    headers = {'content-type': 'application/xml', 'authorization': "Basic " + _readWriteMobileDeviceCredentials}
+    return requests.request("PUT", url, headers=headers, data=xmlToPut)
     
