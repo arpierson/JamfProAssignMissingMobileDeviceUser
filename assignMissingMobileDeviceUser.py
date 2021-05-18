@@ -4,10 +4,8 @@ Created on May 11, 2021
 @author: Allen Pierson
 '''
 
-import requests
+import requests, re, ldap, base64
 import xml.etree.ElementTree as ET
-import re
-import ldap
 from getpass import getpass
 
 
@@ -53,10 +51,12 @@ def setApiCredentials():
     global _adLoginUser
     global _adLoginPw
     
-    _adLoginUser = input("Please enter your AD username: ") + "@hcschools.com"
+    _adLoginUser = input("Please enter your AD username: ")
     _adLoginPw = getpass("Please enter your AD password: ")
-    _readAdvancedSearchCredentials = getpass("Please enter the Base64 Jamf Pro credential for Mobile Device Advanced Search read access: ")
-    _readWriteMobileDeviceCredentials = getpass("Please enter the Base64 Jamf Pro credential for Mobile Device read/write access: ")
+    jamfProCredentialsBytes = str(_adLoginUser + ":" + _adLoginPw).encode('utf-8')
+    jamfProCredentialsBase64 = base64.b64encode(jamfProCredentialsBytes)
+    _readAdvancedSearchCredentials = _readWriteMobileDeviceCredentials = jamfProCredentialsBase64.decode('utf-8')
+    _adLoginUser += "@hcschools.com"
     
   
 def getMobileDevicesMissingAssignedUsers():
