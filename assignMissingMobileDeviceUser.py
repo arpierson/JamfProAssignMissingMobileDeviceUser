@@ -78,6 +78,43 @@ def getMobileDevicesMissingAssignedUsers():
     return searchResult
 
 
+def assignUsersToDevices(jamfProAdvancedSearchXml):
+    '''Loops through a list of mobile devices, gathers the user Active Directory information and adds it to the XML for a device.
+    
+    Parameters
+    ----------
+    jamfProAdvancedSearchXml : requests module result
+        Contains the XML returned for the Jamf Pro Advanced Search results.
+    
+    Returns
+    -------
+    None
+    '''
+    
+    root = ET.fromstring(jamfProAdvancedSearchXml.content)
+    mobileDevicesSubset = root.find('mobile_devices')
+    
+    if mobileDevicesSubset.find('size').text == "0":
+        print("There are no iPads missing an assigned user. You get one sysadmin point.")
+    else:
+        for mobileDevice in mobileDevicesSubset.findall('mobile_device'):
+            deviceId = mobileDevice.find('id').text
+            userAndDeviceInfo = getAdUserInfo(deviceId, mobileDevice.find('AD_Distinguished_Name').text)
+            adUsername = userAndDeviceInfo[0]
+            adDisplayName = userAndDeviceInfo[1]
+            adEmailAddress = userAndDeviceInfo[2]
+            deviceXml = userAndDeviceInfo[3]
+            
+            correctedXml = addUserInfoToXml(deviceXml, adUsername, adDisplayName, adEmailAddress)
+             
+            result = updateDeviceXml(deviceId, correctedXml.encode('utf-8'))
+            
+            if result.status_code != 201:
+                print("Device ID " + str(deviceId) + " HTTP PUT failed with status code of " + str(result.status_code))
+            else:
+                print (adUsername + " was succesfully added to device " + str(deviceId) +".")
+          
+          
 def getAdUserInfo(deviceId, adDistinguishedName):
     '''Looks up a user in Active Directory and returns their AD displayName and mail attributes and the XML data for the iPad to be assigned to the user.
     
@@ -118,40 +155,6 @@ def getAdUserInfo(deviceId, adDistinguishedName):
     return adUsername, adDisplayName, adEmailAddress, result
 
 
-def assignUsersToDevices(jamfProAdvancedSearchXml):
-    '''Loops through a list of mobile devices, gathers the user Active Directory information and adds it to the XML for a device.
-    
-    Parameters
-    ----------
-    jamfProAdvancedSearchXml : requests module result
-        Contains the XML returned for the Jamf Pro Advanced Search results.
-    
-    Returns
-    -------
-    None
-    '''
-    
-    root = ET.fromstring(jamfProAdvancedSearchXml.content)
-    mobileDevicesSubset = root.find('mobile_devices')
-    
-    for mobileDevice in mobileDevicesSubset.findall('mobile_device'):
-        deviceId = mobileDevice.find('id').text
-        userAndDeviceInfo = getAdUserInfo(deviceId, mobileDevice.find('AD_Distinguished_Name').text)
-        adUsername = userAndDeviceInfo[0]
-        adDisplayName = userAndDeviceInfo[1]
-        adEmailAddress = userAndDeviceInfo[2]
-        deviceXml = userAndDeviceInfo[3]
-        
-        correctedXml = addUserInfoToXml(deviceXml, adUsername, adDisplayName, adEmailAddress)
-         
-        result = updateDeviceXml(deviceId, correctedXml.encode('utf-8'))
-        
-        if result.status_code != 201:
-            print("Device ID " + str(deviceId) + " HTTP PUT failed with status code of " + str(result.status_code))
-        else:
-            print (adUsername + " was succesfully added to device " + str(deviceId) +".")
-          
-          
 def getAdAccountInfo(adUsername):
     '''Looks up an Active Directory account and returns the result.
     
