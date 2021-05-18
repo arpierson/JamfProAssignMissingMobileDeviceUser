@@ -79,7 +79,6 @@ def getMobileDevicesMissingAssignedUsers():
     while searchResult.status_code == 401:
         print("You entered invalid credentials. Try again.")
         setApiCredentials()
-        url = "https://jamf.hcschools.net:8443/JSSResource/advancedmobiledevicesearches/id/151"
         headers = {'accept': 'application/xml', 'authorization': "Basic " + _readAdvancedSearchCredentials}
         searchResult = requests.get(url, headers=headers)
     
