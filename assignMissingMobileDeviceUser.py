@@ -75,6 +75,23 @@ def getMobileDevicesMissingAssignedUsers():
     url = "https://jamf.hcschools.net:8443/JSSResource/advancedmobiledevicesearches/id/151"
     headers = {'accept': 'application/xml', 'authorization': "Basic " + _readAdvancedSearchCredentials}
     searchResult = requests.get(url, headers=headers)
+    
+    while searchResult.status_code == 401:
+        print("You entered invalid credentials. Try again.")
+        setApiCredentials()
+        url = "https://jamf.hcschools.net:8443/JSSResource/advancedmobiledevicesearches/id/151"
+        headers = {'accept': 'application/xml', 'authorization': "Basic " + _readAdvancedSearchCredentials}
+        searchResult = requests.get(url, headers=headers)
+    
+    if searchResult.status_code == 403:
+        print("Uh-oh. You don't have permission in Jamf Pro to run this script.")
+        exit()
+    elif searchResult.status_code == 404:
+        print("Yikes. The Jamf Pro Advanced Mobile Device Search that this script relies appears to have been deleted.\n")
+        print("The search should be titled \'Users - Devices missing an assigned user\' and should have a search ID of 151.")
+        print("If the search was deleted, you'll need to recreate it and change the id in the \'url\' variable of getMobileDevicesMissingAssignedUsers")
+        exit()
+        
     return searchResult
 
 
