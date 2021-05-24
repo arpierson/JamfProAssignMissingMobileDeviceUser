@@ -271,4 +271,6 @@ def updateDeviceXml(deviceId, xmlToPut):
     url = "https://jamf.hcschools.net:8443/JSSResource/mobiledevices/id/" + str(deviceId)
     headers = {'content-type': 'application/xml', 'authorization': "Basic " + _readWriteMobileDeviceCredentials}
     return requests.request("PUT", url, headers=headers, data=xmlToPut)
-    
+
+
+run()

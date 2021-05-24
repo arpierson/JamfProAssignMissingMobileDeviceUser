@@ -1,3 +1,0 @@
-import assignMissingMobileDeviceUser
-
-assignMissingMobileDeviceUser.run()
